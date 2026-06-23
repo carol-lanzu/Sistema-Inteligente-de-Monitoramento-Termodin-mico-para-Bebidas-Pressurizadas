@@ -164,7 +164,7 @@ Elementos inovadores do produto:
 * gráficos dinâmicos;
 * manômetro virtual;
 * alerta de pressão;
-* botão de abertura do recipiente;
+* controle didático da abertura em cinco etapas;
 * comparação entre estado inicial e final;
 * análise integrada de pressão, calor e trabalho;
 * aplicação dos conceitos em um cenário cotidiano.
@@ -496,6 +496,7 @@ Após a abertura, o sistema mostra:
 * pressão final;
 * variação de pressão;
 * energia/trabalho estimado;
+* visualização esquemática, controlada por slider, da pressão interna tendendo à atmosférica;
 * interpretação do resultado.
 
 Modelo principal:
@@ -949,6 +950,7 @@ Limitações:
 * utiliza aproximações para transferência de calor;
 * utiliza aproximação para pressão atmosférica;
 * utiliza modelo idealizado para expansão do gás.
+* as etapas de abertura são apenas visuais e não representam tempo, vazão ou escoamento real.
 
 Essas limitações não reduzem o objetivo acadêmico do trabalho, pois o foco é aplicar os conceitos estudados na primeira avaliação de forma integrada, visual e computacional.
 

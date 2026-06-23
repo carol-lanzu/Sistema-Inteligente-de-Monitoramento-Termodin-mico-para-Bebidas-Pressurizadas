@@ -3,6 +3,7 @@
 import streamlit as st
 
 from src.charts import (
+    criar_figura_abertura_recipiente_pressurizado,
     criar_figura_manometro_virtual,
     criar_grafico_calor_tempo,
     criar_grafico_pressao_tempo,
@@ -74,6 +75,20 @@ def exibir_cabecalho() -> None:
     )
 
 
+def exibir_orientacao_inicial() -> None:
+    """Apresenta o fluxo do simulador em seis passos curtos e sequenciais."""
+    st.markdown("### Como usar o simulador")
+    with st.container(border=True):
+        linha_1 = st.columns(3)
+        linha_1[0].markdown("**1. Escolha o cenário**  \nAjuste as condições na barra lateral.")
+        linha_1[1].markdown("**2. Veja a pressão inicial**  \nCompare as três referências de pressão.")
+        linha_1[2].markdown("**3. Observe o calor**  \nAcompanhe temperatura e pressão no tempo.")
+        linha_2 = st.columns(3)
+        linha_2[0].markdown("**4. Leia o manômetro**  \nRelacione pressão e altura da coluna.")
+        linha_2[1].markdown("**5. Abra o recipiente**  \nVisualize a equalização e o trabalho.")
+        linha_2[2].markdown("**6. Conclua a análise**  \nLeia o resumo, hipóteses e alertas.")
+
+
 def exibir_guia_didatico_aba(
     objetivo: str,
     conceito: str,
@@ -97,6 +112,108 @@ def exibir_guia_didatico_aba(
         st.write(fala_apresentacao)
 
 
+def exibir_visualizacao_abertura_em_etapas(
+    pressao_inicial_pa: float,
+    pressao_atmosferica_pa: float,
+) -> int:
+    """
+    Exibe cinco etapas didáticas da abertura controladas por um slider.
+
+    A pressão mostrada entre o estado interno e a atmosfera é interpolada
+    somente para construir uma sequência visual estável. As etapas não
+    representam tempo, vazão nem escoamento transiente real. O cálculo físico
+    principal permanece sendo o trabalho de expansão isotérmica idealizado.
+
+    Args:
+        pressao_inicial_pa: pressão absoluta antes da abertura, em Pa.
+        pressao_atmosferica_pa: pressão atmosférica final assumida, em Pa.
+
+    Returns:
+        Etapa selecionada pelo usuário, em porcentagem de 0 a 100.
+    """
+    pressao_inicial_kpa = converter_pa_para_kpa(pressao_inicial_pa)
+    pressao_atmosferica_kpa = converter_pa_para_kpa(pressao_atmosferica_pa)
+    etapa_percentual = st.slider(
+        "Etapa da abertura",
+        min_value=0,
+        max_value=100,
+        value=0,
+        step=25,
+        format="%d%%",
+        help="Escolha uma das cinco etapas didáticas. A porcentagem não representa tempo real.",
+    )
+    progresso_visual = etapa_percentual / 100.0
+
+    descricoes_etapas = {
+        0: "Recipiente fechado: a pressão interna ainda é a do final da simulação.",
+        25: "A tampa começa a abrir e a comunicação com a atmosfera é iniciada.",
+        50: "Gás saindo: as partículas são apenas uma indicação visual da abertura.",
+        75: "A pressão interna está visualmente próxima da pressão atmosférica.",
+        100: "Estado final idealizado: pressão interna igual à atmosférica.",
+    }
+
+    # A interpolação abaixo controla somente a figura; não é uma lei temporal de pressão.
+    pressao_visual_kpa = pressao_inicial_kpa + (
+        pressao_atmosferica_kpa - pressao_inicial_kpa
+    ) * progresso_visual
+
+    coluna_figura, coluna_valores = st.columns([2, 1])
+    with coluna_figura:
+        st.plotly_chart(
+            criar_figura_abertura_recipiente_pressurizado(
+                pressao_visual_kpa,
+                pressao_atmosferica_kpa,
+                progresso_visual,
+            ),
+            width="stretch",
+        )
+    with coluna_valores:
+        st.markdown(f"### Etapa {etapa_percentual}%")
+        st.write(descricoes_etapas[etapa_percentual])
+        st.metric("Pressão interna exibida", f"{pressao_visual_kpa:.2f} kPa")
+        st.metric("Pressão atmosférica", f"{pressao_atmosferica_kpa:.2f} kPa")
+        st.metric(
+            "Diferença exibida",
+            f"{pressao_visual_kpa - pressao_atmosferica_kpa:.2f} kPa",
+        )
+
+    st.caption(
+        "Etapas disponíveis: 0% fechado · 25% tampa abrindo · 50% gás saindo · "
+        "75% quase equalizado · 100% igual à atmosfera."
+    )
+    st.warning(
+        "Esta visualização é didática: a porcentagem não representa tempo, e a "
+        "interpolação não calcula vazão, velocidade ou escoamento real."
+    )
+    return etapa_percentual
+
+
+def exibir_glossario_rapido_sidebar() -> None:
+    """Exibe definições curtas dos termos principais no final da barra lateral."""
+    with st.sidebar.expander("Glossário rápido"):
+        st.markdown(
+            """
+            **Pressão absoluta:** pressão medida a partir do vácuo.
+
+            **Pressão atmosférica:** pressão exercida pelo ar ao redor.
+
+            **Pressão manométrica:** diferença entre pressão interna absoluta e atmosfera.
+
+            **Gás ideal:** modelo simplificado descrito por `PV = nRT`.
+
+            **Manômetro:** dispositivo que relaciona diferença de pressão e coluna de fluido.
+
+            **Transferência de calor:** energia térmica trocada por diferença de temperatura.
+
+            **Trabalho de expansão:** energia estimada quando o gás se expande.
+
+            **Coeficiente global U:** parâmetro que resume a intensidade da troca térmica.
+
+            **Número de pontos:** quantidade de instantes calculados pelo programa; não é uma propriedade física.
+            """
+        )
+
+
 def coletar_parametros_interface() -> dict[str, float | int | str]:
     """
     Cria os controles de configuração e retorna os valores escolhidos.
@@ -115,9 +232,16 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
     cenario = obter_cenario(nome_cenario)
     chave = nome_cenario.replace(" ", "_")
 
-    st.sidebar.caption(
-        "Os cenários são exemplos didáticos. Todos os campos podem ser ajustados manualmente."
-    )
+    if nome_cenario == "Bebida gelada em ambiente quente":
+        st.sidebar.success(
+            "⭐ Cenário recomendado para a apresentação: mostra aquecimento, variação "
+            "de pressão, manômetro e abertura com resultados fáceis de observar."
+        )
+    else:
+        st.sidebar.info(
+            "Para uma demonstração rápida, escolha “Bebida gelada em ambiente quente”."
+        )
+    st.sidebar.caption("Todos os valores do cenário podem ser ajustados manualmente.")
 
     temperatura_inicial_c = st.sidebar.number_input(
         "Temperatura inicial da bebida (°C)",
@@ -151,20 +275,21 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
         step=10.0,
         key=f"vol_gas_{chave}",
         help=(
-            "Volume ocupado pelo gás no espaço superior. Ele não pode ser zero e "
-            "permanece constante enquanto o recipiente está fechado."
+            "Espaço superior ocupado pelo gás. Antes da abertura, o modelo mantém esse "
+            "volume constante. Junto com pressão e temperatura, ele permite estimar n em PV = nRT."
         ),
     )
     pressao_manometrica_inicial_kpa = st.sidebar.number_input(
-        "Pressão manométrica inicial (kPa)",
+        "Pressurização inicial do recipiente (kPa acima da atmosfera)",
         min_value=-90.0,
         max_value=1000.0,
         value=float(cenario["pressao_manometrica_inicial_kpa"]),
         step=10.0,
         key=f"pressao_{chave}",
         help=(
-            "Diferença entre a pressão absoluta interna e a pressão atmosférica "
-            "local: P_man = P_abs - P_atm."
+            "Define quanto a pressão interna começa acima da atmosfera e permite estimar "
+            "a quantidade inicial de gás. Não é possível obter essa pressão apenas com "
+            "temperatura e volume, pois ainda faltaria n na equação PV = nRT."
         ),
     )
     altitude_m = st.sidebar.number_input(
@@ -174,6 +299,10 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
         value=float(cenario["altitude_m"]),
         step=100.0,
         key=f"altitude_{chave}",
+        help=(
+            "Altura em relação ao nível do mar. O simulador usa uma aproximação linear "
+            "para mostrar como a pressão atmosférica diminui em altitudes moderadas."
+        ),
     )
     tempo_simulacao_h = st.sidebar.number_input(
         "Tempo de simulação (h)",
@@ -182,6 +311,10 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
         value=float(cenario["tempo_simulacao_h"]),
         step=0.5,
         key=f"tempo_{chave}",
+        help=(
+            "Duração total observada nos gráficos de temperatura, calor e pressão. "
+            "Não representa o tempo da abertura do recipiente."
+        ),
     )
     with st.sidebar.expander("Parâmetros avançados"):
         area_superficial_cm2 = st.number_input(
@@ -192,8 +325,8 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
             step=10.0,
             key=f"area_{chave}",
             help=(
-                "Área efetiva usada na troca de calor. Uma área maior aumenta a "
-                "taxa de aquecimento ou resfriamento no modelo."
+                "Área externa aproximada disponível para trocar calor com o ambiente. "
+                "Na relação Q_dot = UAΔT, uma área maior aumenta a taxa de troca."
             ),
         )
         coeficiente_global_u = st.number_input(
@@ -204,8 +337,8 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
             step=0.5,
             key=f"u_{chave}",
             help=(
-                "Parâmetro simplificado que reúne os efeitos de condução e convecção. "
-                "Quanto maior U, mais rápida é a troca de calor."
+                "Coeficiente didático que reúne condução pela parede e convecção. "
+                "Na relação Q_dot = UAΔT, um U maior acelera a troca de calor."
             ),
         )
         fluidos = list(DENSIDADES_FLUIDOS_MANOMETRICOS.keys())
@@ -215,7 +348,10 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
             fluidos,
             index=fluidos.index(fluido_padrao),
             key=f"fluido_{chave}",
-            help="A densidade do fluido determina a altura necessária para indicar a pressão.",
+            help=(
+                "Líquido usado na coluna em U. A densidade não muda a pressão calculada: "
+                "ela muda apenas a altura indicada por Δh = ΔP/(ρg)."
+            ),
         )
         numero_pontos = st.slider(
             "Número de pontos da simulação",
@@ -225,10 +361,12 @@ def coletar_parametros_interface() -> dict[str, float | int | str]:
             step=10,
             key=f"pontos_{chave}",
             help=(
-                "Quantidade de instantes calculados entre o início e o fim. Mais "
-                "pontos deixam as curvas mais detalhadas e reduzem o passo de integração."
+                "Parâmetro computacional, não uma propriedade física. Indica quantos "
+                "instantes o programa calcula entre o começo e o fim da simulação."
             ),
         )
+
+    exibir_glossario_rapido_sidebar()
 
     return {
         "nome_cenario": nome_cenario,
@@ -316,6 +454,7 @@ def converter_e_calcular_estado(parametros: dict[str, float | int | str]) -> dic
 
 aplicar_estilo_visual()
 exibir_cabecalho()
+exibir_orientacao_inicial()
 parametros = coletar_parametros_interface()
 
 try:
@@ -369,7 +508,7 @@ with abas[0]:
             - Temperatura ambiente: **{float(parametros['temperatura_ambiente_c']):.1f} °C**
             - Volume de líquido: **{float(parametros['volume_liquido_ml']):.0f} mL**
             - Volume de gás: **{float(parametros['volume_gas_ml']):.0f} mL**
-            - Pressão manométrica inicial: **{float(parametros['pressao_manometrica_inicial_kpa']):.1f} kPa**
+            - Pressurização inicial acima da atmosfera: **{float(parametros['pressao_manometrica_inicial_kpa']):.1f} kPa**
             """
         )
     with resumo_2:
@@ -510,13 +649,13 @@ with abas[4]:
         conceito="Trabalho de expansão isotérmica idealizada de um gás ideal.",
         formula_principal="W ≈ nRT ln(P_i/P_f)",
         interpretacao=(
-            "O trabalho é positivo somente quando a pressão interna supera a externa. "
-            "O resultado é uma estimativa energética, não a dinâmica real da abertura."
+            "Use o slider para comparar cinco etapas visuais. O trabalho é positivo "
+            "somente quando a pressão interna supera a externa."
         ),
         fala_apresentacao=(
             "Usamos o último estado da simulação como condição antes da abertura. "
-            "Idealizamos uma expansão isotérmica até a pressão atmosférica e calculamos "
-            "o trabalho; não simulamos o escoamento rápido do gás."
+            "O slider mostra cinco etapas didáticas até a atmosfera. Ele não representa "
+            "tempo real; o resultado físico é o trabalho isotérmico idealizado."
         ),
     )
     abertura_1, abertura_2, abertura_3 = st.columns(3)
@@ -528,19 +667,24 @@ with abas[4]:
     )
     st.latex(r"W\approx nRT\ln\left(\frac{P_i}{P_f}\right)")
 
-    if st.button("💨 Abrir recipiente", type="primary", width="stretch"):
-        trabalho_j, trabalho_kj, mensagem_trabalho = calcular_trabalho_expansao_isotermica(
-            estado["quantidade_mols"],
-            float(estado_final["temperatura_k"]),
-            float(estado_final["pressao_absoluta_pa"]),
-            estado["pressao_atmosferica_pa"],
-        )
-        trabalho_1, trabalho_2 = st.columns(2)
-        trabalho_1.metric("Trabalho estimado", f"{trabalho_j:.3f} J")
-        trabalho_2.metric("Trabalho estimado", f"{trabalho_kj:.6f} kJ")
-        st.success(mensagem_trabalho)
-    else:
-        st.info("Acione o botão para calcular a expansão idealizada do estado final.")
+    st.subheader("Visualização didática em etapas")
+    exibir_visualizacao_abertura_em_etapas(
+        pressao_inicial_pa=float(estado_final["pressao_absoluta_pa"]),
+        pressao_atmosferica_pa=estado["pressao_atmosferica_pa"],
+    )
+
+    # O resultado físico permanece independente da etapa visual selecionada.
+    trabalho_j, trabalho_kj, mensagem_trabalho = calcular_trabalho_expansao_isotermica(
+        estado["quantidade_mols"],
+        float(estado_final["temperatura_k"]),
+        float(estado_final["pressao_absoluta_pa"]),
+        estado["pressao_atmosferica_pa"],
+    )
+    st.subheader("Resultado físico para a abertura completa")
+    trabalho_1, trabalho_2 = st.columns(2)
+    trabalho_1.metric("Trabalho estimado", f"{trabalho_j:.3f} J")
+    trabalho_2.metric("Trabalho estimado", f"{trabalho_kj:.6f} kJ")
+    st.success(mensagem_trabalho)
     st.warning(
         "A abertura real é transiente, não necessariamente isotérmica e envolve escoamento. "
         "O cálculo acima é uma estimativa energética didática, não uma previsão industrial."
